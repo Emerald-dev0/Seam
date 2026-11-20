@@ -1,5 +1,5 @@
-use seam_linux_host::protocol::frames::OutboundFrame;
 use seam_linux_host::protocol::auth::Authenticator;
+use seam_linux_host::protocol::frames::OutboundFrame;
 use seam_linux_host::transport::adb::AdbDevice;
 use seam_linux_host::transport::multiplexer::SeamTransportMultiplexer;
 use seam_linux_host::transport::{
@@ -47,7 +47,10 @@ impl SeamTransport for MockTransport {
 
     fn send(&self, frame: &OutboundFrame, _rel: SendReliability) -> io::Result<()> {
         if self.should_fail_send.load(Ordering::Relaxed) {
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "Mock transport failure"));
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "Mock transport failure",
+            ));
         }
         self.sent_frames.lock().unwrap().push(frame.clone());
         Ok(())
@@ -126,11 +129,13 @@ fn test_multiplexer_switching_and_failover() {
     };
 
     // Add USB as primary
-    mux.add_and_connect_transport(usb_transport, &usb_endpoint, &auth, true).unwrap();
+    mux.add_and_connect_transport(usb_transport, &usb_endpoint, &auth, true)
+        .unwrap();
     assert_eq!(mux.active_primary_kind(), Some(TransportKind::UsbAdb));
 
     // Add Wi-Fi as standby
-    mux.add_and_connect_transport(wifi_transport, &wifi_endpoint, &auth, false).unwrap();
+    mux.add_and_connect_transport(wifi_transport, &wifi_endpoint, &auth, false)
+        .unwrap();
     assert_eq!(mux.active_primary_kind(), Some(TransportKind::UsbAdb));
 
     // Send frame -> should go to USB
@@ -140,7 +145,8 @@ fn test_multiplexer_switching_and_failover() {
     assert_eq!(wifi_sent.lock().unwrap().len(), 0);
 
     // Manual switch to Wi-Fi
-    mux.switch_active_transport(TransportKind::WifiHybrid).unwrap();
+    mux.switch_active_transport(TransportKind::WifiHybrid)
+        .unwrap();
     assert_eq!(mux.active_primary_kind(), Some(TransportKind::WifiHybrid));
 
     // Send frame -> should go to Wi-Fi

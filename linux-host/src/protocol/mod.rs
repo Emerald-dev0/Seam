@@ -1,4 +1,4 @@
-pub mod wire;
-pub mod frames;
-pub mod crypto;
 pub mod auth;
+pub mod crypto;
+pub mod frames;
+pub mod wire;

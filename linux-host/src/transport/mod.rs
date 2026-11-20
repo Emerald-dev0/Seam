@@ -1,7 +1,7 @@
-use std::io;
-use std::time::Instant;
 use crate::protocol::auth::Authenticator;
 use crate::protocol::frames::{InboundFrame, OutboundFrame};
+use std::io;
+use std::time::Instant;
 
 pub mod adb;
 pub mod multiplexer;
@@ -60,8 +60,15 @@ impl std::fmt::Display for TransportState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SeamEndpoint {
-    UsbLocalhost { port: u16, serial: String },
-    Wifi { host: String, tcp_port: u16, udp_port: u16 },
+    UsbLocalhost {
+        port: u16,
+        serial: String,
+    },
+    Wifi {
+        host: String,
+        tcp_port: u16,
+        udp_port: u16,
+    },
 }
 
 pub trait TransportDelegate: Send + Sync {
@@ -74,7 +81,8 @@ pub trait SeamTransport: Send + Sync {
     fn kind(&self) -> TransportKind;
     fn state(&self) -> TransportState;
     fn last_rtt_us(&self) -> u64;
-    fn connect(&mut self, endpoint: &SeamEndpoint, authenticator: &Authenticator) -> io::Result<()>;
+    fn connect(&mut self, endpoint: &SeamEndpoint, authenticator: &Authenticator)
+        -> io::Result<()>;
     fn send(&self, frame: &OutboundFrame, reliability: SendReliability) -> io::Result<()>;
     fn send_ping(&self) -> io::Result<()>;
     fn disconnect(&mut self, reason: &str);

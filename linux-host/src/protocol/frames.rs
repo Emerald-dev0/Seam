@@ -1,7 +1,5 @@
+use crate::protocol::wire::{from_normalized_u16, read_prefixed_utf8, EdgeSide};
 use std::io::{self, Read};
-use crate::protocol::wire::{
-    from_normalized_u16, read_prefixed_utf8, EdgeSide,
-};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboundFrame {
@@ -58,15 +56,7 @@ impl OutboundFrame {
             }
             OutboundFrame::KeyReport { modifiers, keys } => {
                 vec![
-                    0x02,
-                    *modifiers,
-                    0x00,
-                    keys[0],
-                    keys[1],
-                    keys[2],
-                    keys[3],
-                    keys[4],
-                    keys[5],
+                    0x02, *modifiers, 0x00, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5],
                 ]
             }
             OutboundFrame::CursorEnter {
@@ -91,10 +81,7 @@ impl OutboundFrame {
                 vec![0x04, *reason]
             }
             OutboundFrame::ClipboardSet { text } => {
-                let mut bytes = text.as_bytes();
-                if bytes.len() > crate::protocol::wire::MAX_CLIP_LEN {
-                    bytes = &bytes[..crate::protocol::wire::MAX_CLIP_LEN];
-                }
+                let bytes = truncate_utf8(text, crate::protocol::wire::MAX_CLIP_LEN);
                 let len = (bytes.len() as u32).to_le_bytes();
                 let mut out = Vec::with_capacity(5 + bytes.len());
                 out.push(0x05);
@@ -211,4 +198,19 @@ impl InboundFrame {
             )),
         }
     }
+}
+
+/// Truncates `text` to at most `max_bytes` UTF-8 bytes without splitting a
+/// multi-byte code point. Mirrors the macOS and Android implementations, which
+/// walk backwards from the limit while the byte is a UTF-8 continuation byte.
+pub fn truncate_utf8(text: &str, max_bytes: usize) -> &[u8] {
+    let bytes = text.as_bytes();
+    if bytes.len() <= max_bytes {
+        return bytes;
+    }
+    let mut end = max_bytes;
+    while end > 0 && (bytes[end] & 0xC0) == 0x80 {
+        end -= 1;
+    }
+    &bytes[..end]
 }

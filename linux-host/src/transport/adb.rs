@@ -29,7 +29,11 @@ pub fn locate_adb() -> String {
             return path;
         }
     }
-    for candidate in &["/usr/bin/adb", "/usr/local/bin/adb", "/opt/android-sdk/platform-tools/adb"] {
+    for candidate in &[
+        "/usr/bin/adb",
+        "/usr/local/bin/adb",
+        "/opt/android-sdk/platform-tools/adb",
+    ] {
         if std::path::Path::new(candidate).is_file() {
             return candidate.to_string();
         }
@@ -55,10 +59,10 @@ pub fn run_adb_command(adb_bin: &str, args: &[&str]) -> io::Result<String> {
     let output = cmd.output()?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("ADB command failed (status={}): {}", output.status, err),
-        ));
+        return Err(io::Error::other(format!(
+            "ADB command failed (status={}): {}",
+            output.status, err
+        )));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }

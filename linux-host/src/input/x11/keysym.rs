@@ -1,13 +1,13 @@
 use crate::input::x11::ffi::KeySym;
 
-pub const MOD_LEFT_CTRL: u8   = 1 << 0;
-pub const MOD_LEFT_SHIFT: u8  = 1 << 1;
-pub const MOD_LEFT_ALT: u8    = 1 << 2;
-pub const MOD_LEFT_META: u8   = 1 << 3;
-pub const MOD_RIGHT_CTRL: u8  = 1 << 4;
+pub const MOD_LEFT_CTRL: u8 = 1 << 0;
+pub const MOD_LEFT_SHIFT: u8 = 1 << 1;
+pub const MOD_LEFT_ALT: u8 = 1 << 2;
+pub const MOD_LEFT_META: u8 = 1 << 3;
+pub const MOD_RIGHT_CTRL: u8 = 1 << 4;
 pub const MOD_RIGHT_SHIFT: u8 = 1 << 5;
-pub const MOD_RIGHT_ALT: u8   = 1 << 6;
-pub const MOD_RIGHT_META: u8  = 1 << 7;
+pub const MOD_RIGHT_ALT: u8 = 1 << 6;
+pub const MOD_RIGHT_META: u8 = 1 << 7;
 
 pub const HID_USAGE_NONE: u8 = 0x00;
 pub const HID_USAGE_ESCAPE: u8 = 0x29;
@@ -18,7 +18,7 @@ pub fn is_modifier_keysym(keysym: KeySym) -> bool {
         0xffe1 | 0xffe2 | // Shift_L, Shift_R
         0xffe3 | 0xffe4 | // Control_L, Control_R
         0xffe9 | 0xffea | // Alt_L, Alt_R
-        0xffeb | 0xffec   // Super_L, Super_R
+        0xffeb | 0xffec // Super_L, Super_R
     )
 }
 

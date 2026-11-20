@@ -1,6 +1,6 @@
+use crate::input::x11::ffi::*;
 use std::ffi::c_int;
 use std::ptr;
-use crate::input::x11::ffi::*;
 
 pub struct X11DisplaySession {
     display: *mut Display,

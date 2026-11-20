@@ -1,7 +1,7 @@
+use crate::protocol::wire::EdgeSide;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use crate::protocol::wire::EdgeSide;
 
 #[derive(Debug, Clone)]
 pub struct HostConfig {
@@ -24,19 +24,23 @@ impl HostConfig {
     pub fn config_path() -> PathBuf {
         let candidate_dirs = [
             std::env::var("SEAM_CONFIG_DIR").ok().map(PathBuf::from),
-            std::env::var("XDG_CONFIG_HOME").ok().map(|x| PathBuf::from(x).join("seam")),
-            std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".seam")),
+            std::env::var("XDG_CONFIG_HOME")
+                .ok()
+                .map(|x| PathBuf::from(x).join("seam")),
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".seam")),
             Some(PathBuf::from("/tmp/.seam")),
         ];
-        for dir_opt in &candidate_dirs {
-            if let Some(dir) = dir_opt {
-                let p = dir.join("config.ini");
-                if p.is_file() {
-                    return p;
-                }
+        for dir in candidate_dirs.iter().flatten() {
+            let p = dir.join("config.ini");
+            if p.is_file() {
+                return p;
             }
         }
-        let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/tmp"));
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/tmp"));
         home.join(".seam").join("config.ini")
     }
 
@@ -51,15 +55,13 @@ impl HostConfig {
                 }
                 if let Some((k, v)) = trimmed.split_once('=') {
                     match k.trim() {
-                        "edge" => {
-                            match v.trim().to_lowercase().as_str() {
-                                "left" => cfg.active_edge = EdgeSide::Left,
-                                "right" => cfg.active_edge = EdgeSide::Right,
-                                "top" => cfg.active_edge = EdgeSide::Top,
-                                "bottom" => cfg.active_edge = EdgeSide::Bottom,
-                                _ => {}
-                            }
-                        }
+                        "edge" => match v.trim().to_lowercase().as_str() {
+                            "left" => cfg.active_edge = EdgeSide::Left,
+                            "right" => cfg.active_edge = EdgeSide::Right,
+                            "top" => cfg.active_edge = EdgeSide::Top,
+                            "bottom" => cfg.active_edge = EdgeSide::Bottom,
+                            _ => {}
+                        },
                         "velocity_gain" => {
                             if let Ok(val) = v.trim().parse::<f64>() {
                                 cfg.velocity_gain = val.clamp(0.5, 5.0);
@@ -97,17 +99,19 @@ impl HostConfig {
 
         let candidate_dirs = [
             std::env::var("SEAM_CONFIG_DIR").ok().map(PathBuf::from),
-            std::env::var("XDG_CONFIG_HOME").ok().map(|x| PathBuf::from(x).join("seam")),
-            std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".seam")),
+            std::env::var("XDG_CONFIG_HOME")
+                .ok()
+                .map(|x| PathBuf::from(x).join("seam")),
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".seam")),
             Some(PathBuf::from("/tmp/.seam")),
         ];
-        for dir_opt in &candidate_dirs {
-            if let Some(dir) = dir_opt {
-                if fs::create_dir_all(dir).is_ok() {
-                    let path = dir.join("config.ini");
-                    if fs::write(&path, &content).is_ok() {
-                        return Ok(());
-                    }
+        for dir in candidate_dirs.iter().flatten() {
+            if fs::create_dir_all(dir).is_ok() {
+                let path = dir.join("config.ini");
+                if fs::write(&path, &content).is_ok() {
+                    return Ok(());
                 }
             }
         }

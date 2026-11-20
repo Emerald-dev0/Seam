@@ -77,16 +77,27 @@ impl SeamTransport for WifiHybridTransport {
     }
 
     fn state(&self) -> TransportState {
-        self.state.lock().map(|s| s.clone()).unwrap_or(TransportState::Idle)
+        self.state
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or(TransportState::Idle)
     }
 
     fn last_rtt_us(&self) -> u64 {
         self.last_rtt_us.load(Ordering::Relaxed)
     }
 
-    fn connect(&mut self, endpoint: &SeamEndpoint, authenticator: &Authenticator) -> io::Result<()> {
+    fn connect(
+        &mut self,
+        endpoint: &SeamEndpoint,
+        authenticator: &Authenticator,
+    ) -> io::Result<()> {
         let (host, tcp_port, udp_port) = match endpoint {
-            SeamEndpoint::Wifi { host, tcp_port, udp_port } => (host.as_str(), *tcp_port, *udp_port),
+            SeamEndpoint::Wifi {
+                host,
+                tcp_port,
+                udp_port,
+            } => (host.as_str(), *tcp_port, *udp_port),
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -99,7 +110,10 @@ impl SeamTransport for WifiHybridTransport {
 
         // 1. Connect TCP control socket with 1.5s timeout
         let tcp_addr: SocketAddr = format!("{}:{}", host, tcp_port).parse().map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid TCP address: {}", e))
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid TCP address: {}", e),
+            )
         })?;
 
         let stream = TcpStream::connect_timeout(&tcp_addr, Duration::from_millis(1500))?;
@@ -107,7 +121,10 @@ impl SeamTransport for WifiHybridTransport {
 
         // 2. Connect UDP fast-path socket
         let udp_addr: SocketAddr = format!("{}:{}", host, udp_port).parse().map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid UDP address: {}", e))
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid UDP address: {}", e),
+            )
         })?;
 
         let udp = UdpSocket::bind("0.0.0.0:0")?;
@@ -119,15 +136,16 @@ impl SeamTransport for WifiHybridTransport {
         let mut read_half = stream.try_clone()?;
         let mut write_half = stream.try_clone()?;
 
-        let session_id = match authenticator.authenticate_client_stream(&mut read_half, &mut write_half) {
-            Ok(sid) => sid,
-            Err(e) => {
-                self.update_state(TransportState::Closed {
-                    reason: format!("Wi-Fi Authentication failed: {}", e),
-                });
-                return Err(e);
-            }
-        };
+        let session_id =
+            match authenticator.authenticate_client_stream(&mut read_half, &mut write_half) {
+                Ok(sid) => sid,
+                Err(e) => {
+                    self.update_state(TransportState::Closed {
+                        reason: format!("Wi-Fi Authentication failed: {}", e),
+                    });
+                    return Err(e);
+                }
+            };
 
         self.session_id.store(session_id, Ordering::SeqCst);
         self.udp_sequence.store(0, Ordering::SeqCst);
@@ -219,8 +237,8 @@ impl SeamTransport for WifiHybridTransport {
                             if is_valid && buf[17] == 0x84 {
                                 // OP_PONG over UDP
                                 let sent_us = u64::from_le_bytes([
-                                    buf[18], buf[19], buf[20], buf[21],
-                                    buf[22], buf[23], buf[24], buf[25],
+                                    buf[18], buf[19], buf[20], buf[21], buf[22], buf[23], buf[24],
+                                    buf[25],
                                 ]);
                                 let now = now_monotonic_us();
                                 if now >= sent_us {
@@ -266,17 +284,31 @@ impl SeamTransport for WifiHybridTransport {
 
     fn send(&self, frame: &OutboundFrame, reliability: SendReliability) -> io::Result<()> {
         if !self.running.load(Ordering::Relaxed) {
-            return Err(io::Error::new(io::ErrorKind::NotConnected, "Wi-Fi transport is not connected"));
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Wi-Fi transport is not connected",
+            ));
         }
 
         // Fast-path: route pure mouse motion deltas over HMAC-signed UDP datagrams
         if reliability == SendReliability::UnreliableSequenced {
-            if let OutboundFrame::MouseReport { buttons, dx, dy, v_wheel, h_wheel } = frame {
+            if let OutboundFrame::MouseReport {
+                buttons,
+                dx,
+                dy,
+                v_wheel,
+                h_wheel,
+            } = frame
+            {
                 let seq = self.udp_sequence.fetch_add(1, Ordering::Relaxed) + 1;
                 let sid = self.session_id.load(Ordering::Relaxed);
 
                 let auth_opt = self.authenticator.lock().ok().and_then(|l| l.clone());
-                let udp_opt = self.udp_socket.lock().ok().and_then(|l| l.as_ref().map(|s| s.try_clone().ok()).flatten());
+                let udp_opt = self
+                    .udp_socket
+                    .lock()
+                    .ok()
+                    .and_then(|l| l.as_ref().and_then(|s| s.try_clone().ok()));
 
                 if let (Some(auth), Some(udp)) = (auth_opt, udp_opt) {
                     let dx_b = dx.to_le_bytes();
@@ -309,12 +341,18 @@ impl SeamTransport for WifiHybridTransport {
                 return Ok(());
             }
         }
-        Err(io::Error::new(io::ErrorKind::NotConnected, "Wi-Fi TCP stream is closed"))
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "Wi-Fi TCP stream is closed",
+        ))
     }
 
     fn send_ping(&self) -> io::Result<()> {
         let now = now_monotonic_us();
-        self.send(&OutboundFrame::Ping { timestamp_us: now }, SendReliability::ReliableOrdered)
+        self.send(
+            &OutboundFrame::Ping { timestamp_us: now },
+            SendReliability::ReliableOrdered,
+        )
     }
 
     fn disconnect(&mut self, reason: &str) {

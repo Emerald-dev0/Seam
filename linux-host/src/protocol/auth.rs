@@ -1,8 +1,8 @@
+use crate::protocol::crypto::{compute_hmac_sha256, constant_time_eq};
+use crate::protocol::wire::{AUTH_STATUS_OK, MAGIC_BYTES, VERSION_BYTE};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use crate::protocol::crypto::{compute_hmac_sha256, constant_time_eq};
-use crate::protocol::wire::{AUTH_STATUS_OK, MAGIC_BYTES, VERSION_BYTE};
 
 pub const NONCE_LEN: usize = 32;
 pub const UDP_TAG_LEN: usize = 16;
@@ -52,19 +52,21 @@ impl Authenticator {
     pub fn load_or_create() -> io::Result<Self> {
         let candidate_dirs = [
             std::env::var("SEAM_CONFIG_DIR").ok().map(PathBuf::from),
-            std::env::var("XDG_CONFIG_HOME").ok().map(|x| PathBuf::from(x).join("seam")),
-            std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".seam")),
+            std::env::var("XDG_CONFIG_HOME")
+                .ok()
+                .map(|x| PathBuf::from(x).join("seam")),
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".seam")),
             Some(PathBuf::from("/tmp/.seam")),
         ];
 
         // 1. Try to read existing key
-        for dir_opt in &candidate_dirs {
-            if let Some(dir) = dir_opt {
-                let key_file = dir.join("auth_key");
-                if let Ok(content) = fs::read_to_string(&key_file) {
-                    if let Some(auth) = Self::from_hex(&content) {
-                        return Ok(auth);
-                    }
+        for dir in candidate_dirs.iter().flatten() {
+            let key_file = dir.join("auth_key");
+            if let Ok(content) = fs::read_to_string(&key_file) {
+                if let Some(auth) = Self::from_hex(&content) {
+                    return Ok(auth);
                 }
             }
         }
@@ -77,14 +79,12 @@ impl Authenticator {
 
         // 3. Try to save to first writable directory
         let mut saved = false;
-        for dir_opt in &candidate_dirs {
-            if let Some(dir) = dir_opt {
-                if fs::create_dir_all(dir).is_ok() {
-                    let key_file = dir.join("auth_key");
-                    if fs::write(&key_file, auth.hex()).is_ok() {
-                        saved = true;
-                        break;
-                    }
+        for dir in candidate_dirs.iter().flatten() {
+            if fs::create_dir_all(dir).is_ok() {
+                let key_file = dir.join("auth_key");
+                if fs::write(&key_file, auth.hex()).is_ok() {
+                    saved = true;
+                    break;
                 }
             }
         }
@@ -124,10 +124,8 @@ impl Authenticator {
         let mut urandom = fs::File::open("/dev/urandom")?;
         urandom.read_exact(&mut client_nonce)?;
 
-        let client_hmac = compute_hmac_sha256(
-            &self.key,
-            &[CLIENT_DOMAIN, server_nonce, &client_nonce],
-        );
+        let client_hmac =
+            compute_hmac_sha256(&self.key, &[CLIENT_DOMAIN, server_nonce, &client_nonce]);
 
         // Send 68-byte Client Response: MAGIC(4B) || client_nonce(32B) || client_hmac(32B)
         let mut response = Vec::with_capacity(68);
@@ -145,7 +143,10 @@ impl Authenticator {
         if status != AUTH_STATUS_OK {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                format!("Server rejected authentication with status 0x{:02X}", status),
+                format!(
+                    "Server rejected authentication with status 0x{:02X}",
+                    status
+                ),
             ));
         }
 
@@ -166,8 +167,14 @@ impl Authenticator {
         }
 
         let session_id = u64::from_le_bytes([
-            session_id_bytes[0], session_id_bytes[1], session_id_bytes[2], session_id_bytes[3],
-            session_id_bytes[4], session_id_bytes[5], session_id_bytes[6], session_id_bytes[7],
+            session_id_bytes[0],
+            session_id_bytes[1],
+            session_id_bytes[2],
+            session_id_bytes[3],
+            session_id_bytes[4],
+            session_id_bytes[5],
+            session_id_bytes[6],
+            session_id_bytes[7],
         ]);
 
         Ok(session_id)

@@ -72,9 +72,20 @@ pub fn run_list_devices() {
             }
             println!("Attached devices ({}):", devices.len());
             for d in devices {
-                let kind = if d.is_wireless() { "Wi-Fi / Wireless" } else { "USB" };
-                let auth_note = if d.is_unauthorized() { " [UNAUTHORIZED - Tap 'Allow USB debugging' on phone]" } else { "" };
-                println!("  * {} | state: {} | model: {} | type: {} | transport_id: {}{}", d.serial, d.state, d.model, kind, d.transport_id, auth_note);
+                let kind = if d.is_wireless() {
+                    "Wi-Fi / Wireless"
+                } else {
+                    "USB"
+                };
+                let auth_note = if d.is_unauthorized() {
+                    " [UNAUTHORIZED - Tap 'Allow USB debugging' on phone]"
+                } else {
+                    ""
+                };
+                println!(
+                    "  * {} | state: {} | model: {} | type: {} | transport_id: {}{}",
+                    d.serial, d.state, d.model, kind, d.transport_id, auth_note
+                );
             }
         }
         Err(e) => {
@@ -102,7 +113,10 @@ pub fn run_device_info() {
     }
     let target = &devices[0];
     if target.is_unauthorized() {
-        eprintln!("Device {} is unauthorized. Please tap 'Allow USB debugging' on the screen.", target.serial);
+        eprintln!(
+            "Device {} is unauthorized. Please tap 'Allow USB debugging' on the screen.",
+            target.serial
+        );
         return;
     }
 
@@ -119,10 +133,8 @@ pub fn run_device_info() {
         );
     }
 
-    let cmd = format!(
-        "CLASSPATH=/data/local/tmp/seam-agent.jar app_process /system/bin --nice-name=seam_agent com.seam.agent.Main --info"
-    );
-    match run_adb_command(&adb, &["-s", &target.serial, "shell", &cmd]) {
+    let cmd = "CLASSPATH=/data/local/tmp/seam-agent.jar app_process /system/bin --nice-name=seam_agent com.seam.agent.Main --info";
+    match run_adb_command(&adb, &["-s", &target.serial, "shell", cmd]) {
         Ok(output) => println!("{}", output),
         Err(e) => eprintln!("Failed to query device info: {}", e),
     }
@@ -143,20 +155,27 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
             "right" => config.active_edge = EdgeSide::Right,
             "top" => config.active_edge = EdgeSide::Top,
             "bottom" => config.active_edge = EdgeSide::Bottom,
-            _ => eprintln!("Warning: Unknown edge '{}', using {:?}", edge_str, config.active_edge),
+            _ => eprintln!(
+                "Warning: Unknown edge '{}', using {:?}",
+                edge_str, config.active_edge
+            ),
         }
     }
 
     println!("Bootstrapping session on Android device...");
-    let (device, usb_endpoint, wifi_endpoints, auth) = match bootstrapper.bootstrap_session(preferred_serial) {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Bootstrap error: {}", e);
-            return;
-        }
-    };
+    let (device, usb_endpoint, wifi_endpoints, auth) =
+        match bootstrapper.bootstrap_session(preferred_serial) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("Bootstrap error: {}", e);
+                return;
+            }
+        };
 
-    println!("Attached device      : {} ({})", device.serial, device.model);
+    println!(
+        "Attached device      : {} ({})",
+        device.serial, device.model
+    );
     println!("Active Boundary Edge : {:?}", config.active_edge);
     println!("USB ADB Endpoint     : {:?}", usb_endpoint);
 
@@ -172,7 +191,10 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
 
     // Connect Wi-Fi standby transport if available
     if let Some(wifi_target) = wifi_endpoints.first() {
-        println!("Found Wi-Fi Endpoint : {}:{} ({})", wifi_target.ip, wifi_target.port, wifi_target.interface_name);
+        println!(
+            "Found Wi-Fi Endpoint : {}:{} ({})",
+            wifi_target.ip, wifi_target.port, wifi_target.interface_name
+        );
         let wifi = Box::new(WifiHybridTransport::new());
         let wifi_ep = wifi_target.to_seam_endpoint();
         if let Err(e) = mux.add_and_connect_transport(wifi, &wifi_ep, &auth, false) {
@@ -190,7 +212,10 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
     edge_engine.set_velocity_gain(config.velocity_gain);
 
     println!("------------------------------------------------------------");
-    println!("Ready! Move your cursor against the {:?} screen edge to cross onto Android.", config.active_edge);
+    println!(
+        "Ready! Move your cursor against the {:?} screen edge to cross onto Android.",
+        config.active_edge
+    );
     println!("Press Escape at any time to panic return cursor to Linux.");
     println!("------------------------------------------------------------");
 
@@ -293,7 +318,10 @@ pub fn run_wifi_test(target_ip: Option<&str>) {
     };
 
     let mut wifi = WifiHybridTransport::new();
-    println!("Connecting Wi-Fi Hybrid Transport to {}:{}...", ip, DEFAULT_PORT);
+    println!(
+        "Connecting Wi-Fi Hybrid Transport to {}:{}...",
+        ip, DEFAULT_PORT
+    );
     if let Err(e) = wifi.connect(&endpoint, &auth) {
         eprintln!("Wi-Fi connect failed: {}", e);
         return;
@@ -303,7 +331,12 @@ pub fn run_wifi_test(target_ip: Option<&str>) {
     for i in 1..=5 {
         thread::sleep(Duration::from_millis(150));
         let _ = wifi.send_ping();
-        println!("  Probe #{}: TCP RTT = {} µs, UDP RTT = {} µs", i, wifi.last_rtt_us(), wifi.last_udp_rtt_us());
+        println!(
+            "  Probe #{}: TCP RTT = {} µs, UDP RTT = {} µs",
+            i,
+            wifi.last_rtt_us(),
+            wifi.last_udp_rtt_us()
+        );
     }
 
     wifi.disconnect("Wi-Fi test complete");
@@ -315,14 +348,56 @@ pub fn run_self_test_cli() {
     println!("============================================================");
     println!(" SEAM Linux Host — Self-Test Suite");
     println!("============================================================");
-    println!("1. ADB Availability       : {}", if report.adb_available { "PASS" } else { "FAIL (Missing 'adb')" });
-    println!("2. Cryptographic Engine   : {}", if report.crypto_ok { "PASS (libcrypto)" } else { "FAIL" });
-    println!("3. Auth Key Configuration : {}", if report.auth_key_configured { "PASS" } else { "FAIL" });
-    println!("4. X11 Windowing & Input  : {}", if report.x11_available { "PASS" } else { "WARN (X11 unavailable in headless)" });
-    println!("5. Clipboard Utilities    : {}", if report.clipboard_tool.is_some() { "PASS" } else { "WARN (Install xclip or xsel)" });
+    println!(
+        "1. ADB Availability       : {}",
+        if report.adb_available {
+            "PASS"
+        } else {
+            "FAIL (Missing 'adb')"
+        }
+    );
+    println!(
+        "2. Cryptographic Engine   : {}",
+        if report.crypto_ok {
+            "PASS (libcrypto)"
+        } else {
+            "FAIL"
+        }
+    );
+    println!(
+        "3. Auth Key Configuration : {}",
+        if report.auth_key_configured {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    );
+    println!(
+        "4. X11 Windowing & Input  : {}",
+        if report.x11_available {
+            "PASS"
+        } else {
+            "WARN (X11 unavailable in headless)"
+        }
+    );
+    println!(
+        "5. Clipboard Utilities    : {}",
+        if report.clipboard_tool.is_some() {
+            "PASS"
+        } else {
+            "WARN (Install xclip or xsel)"
+        }
+    );
     println!("------------------------------------------------------------");
     let all_ok = report.adb_available && report.crypto_ok && report.auth_key_configured;
-    println!("Overall Self-Test Result  : {}", if all_ok { "READY" } else { "ATTENTION REQUIRED" });
+    println!(
+        "Overall Self-Test Result  : {}",
+        if all_ok {
+            "READY"
+        } else {
+            "ATTENTION REQUIRED"
+        }
+    );
     println!("============================================================");
 }
 

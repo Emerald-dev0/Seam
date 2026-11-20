@@ -61,14 +61,21 @@ impl SeamTransport for UsbAdbTransport {
     }
 
     fn state(&self) -> TransportState {
-        self.state.lock().map(|s| s.clone()).unwrap_or(TransportState::Idle)
+        self.state
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or(TransportState::Idle)
     }
 
     fn last_rtt_us(&self) -> u64 {
         self.last_rtt_us.load(Ordering::Relaxed)
     }
 
-    fn connect(&mut self, endpoint: &SeamEndpoint, authenticator: &Authenticator) -> io::Result<()> {
+    fn connect(
+        &mut self,
+        endpoint: &SeamEndpoint,
+        authenticator: &Authenticator,
+    ) -> io::Result<()> {
         let port = match endpoint {
             SeamEndpoint::UsbLocalhost { port, .. } => *port,
             _ => {
@@ -89,15 +96,16 @@ impl SeamTransport for UsbAdbTransport {
         let mut read_half = stream.try_clone()?;
         let mut write_half = stream.try_clone()?;
 
-        let session_id = match authenticator.authenticate_client_stream(&mut read_half, &mut write_half) {
-            Ok(sid) => sid,
-            Err(e) => {
-                self.update_state(TransportState::Closed {
-                    reason: format!("Authentication failed: {}", e),
-                });
-                return Err(e);
-            }
-        };
+        let session_id =
+            match authenticator.authenticate_client_stream(&mut read_half, &mut write_half) {
+                Ok(sid) => sid,
+                Err(e) => {
+                    self.update_state(TransportState::Closed {
+                        reason: format!("Authentication failed: {}", e),
+                    });
+                    return Err(e);
+                }
+            };
 
         self.running.store(true, Ordering::SeqCst);
         if let Ok(mut lock) = self.stream.lock() {
@@ -181,7 +189,10 @@ impl SeamTransport for UsbAdbTransport {
 
     fn send(&self, frame: &OutboundFrame, _reliability: SendReliability) -> io::Result<()> {
         if !self.running.load(Ordering::Relaxed) {
-            return Err(io::Error::new(io::ErrorKind::NotConnected, "USB transport is not connected"));
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "USB transport is not connected",
+            ));
         }
         let bytes = frame.serialize();
         if let Ok(mut lock) = self.stream.lock() {
@@ -190,12 +201,18 @@ impl SeamTransport for UsbAdbTransport {
                 return Ok(());
             }
         }
-        Err(io::Error::new(io::ErrorKind::NotConnected, "USB transport socket is closed"))
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "USB transport socket is closed",
+        ))
     }
 
     fn send_ping(&self) -> io::Result<()> {
         let now = now_monotonic_us();
-        self.send(&OutboundFrame::Ping { timestamp_us: now }, SendReliability::ReliableOrdered)
+        self.send(
+            &OutboundFrame::Ping { timestamp_us: now },
+            SendReliability::ReliableOrdered,
+        )
     }
 
     fn disconnect(&mut self, reason: &str) {

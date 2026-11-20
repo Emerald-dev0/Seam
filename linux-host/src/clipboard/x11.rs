@@ -95,10 +95,7 @@ fn read_linux_clipboard() -> Option<String> {
         }
     }
     // Fallback to xsel
-    if let Ok(output) = Command::new("xsel")
-        .args(["-b", "-o"])
-        .output()
-    {
+    if let Ok(output) = Command::new("xsel").args(["-b", "-o"]).output() {
         if output.status.success() {
             return String::from_utf8(output.stdout).ok();
         }

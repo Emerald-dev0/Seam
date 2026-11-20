@@ -53,7 +53,15 @@ impl SpatialEdgeEngine {
     }
 
     /// Evaluates whether a cursor location at (x, y) should transition into Android
-    pub fn evaluate_crossing(&mut self, x: i32, y: i32, dx: f64, dy: f64, width: i32, height: i32) -> bool {
+    pub fn evaluate_crossing(
+        &mut self,
+        x: i32,
+        y: i32,
+        dx: f64,
+        dy: f64,
+        width: i32,
+        height: i32,
+    ) -> bool {
         if self.current_target != CursorTarget::Linux {
             return false;
         }
@@ -69,14 +77,26 @@ impl SpatialEdgeEngine {
         let in_safe_horizontal = x > 16 && x < width - 16;
 
         let (in_zone, in_band, outward_delta) = match self.active_edge {
-            EdgeSide::Right => (width - x <= 3, in_safe_vertical, if dx > 0.0 { dx } else { 0.0 }),
+            EdgeSide::Right => (
+                width - x <= 3,
+                in_safe_vertical,
+                if dx > 0.0 { dx } else { 0.0 },
+            ),
             EdgeSide::Left => (x <= 3, in_safe_vertical, if dx < 0.0 { -dx } else { 0.0 }),
-            EdgeSide::Bottom => (height - y <= 3, in_safe_horizontal, if dy > 0.0 { dy } else { 0.0 }),
+            EdgeSide::Bottom => (
+                height - y <= 3,
+                in_safe_horizontal,
+                if dy > 0.0 { dy } else { 0.0 },
+            ),
             EdgeSide::Top => (y <= 3, in_safe_horizontal, if dy < 0.0 { -dy } else { 0.0 }),
         };
 
         if in_zone && in_band {
-            self.outward_push += if outward_delta > 0.0 { outward_delta } else { 0.6 };
+            self.outward_push += if outward_delta > 0.0 {
+                outward_delta
+            } else {
+                0.6
+            };
             if self.outward_push >= 2.0 {
                 self.outward_push = 0.0;
                 return true;
@@ -98,7 +118,9 @@ impl SpatialEdgeEngine {
         };
 
         let (width, height) = display_session.dimensions();
-        let cursor_ctrl = X11CursorController::new(display_session.display_ptr(), display_session.root_window());
+        let cursor_ctrl = unsafe {
+            X11CursorController::new(display_session.display_ptr(), display_session.root_window())
+        };
         let mut grabber = X11Grabber::new(
             display_session.display_ptr(),
             display_session.root_window(),
@@ -106,7 +128,9 @@ impl SpatialEdgeEngine {
         );
 
         self.running.store(true, Ordering::SeqCst);
-        let mut prev_loc = display_session.query_pointer().unwrap_or((width / 2, height / 2));
+        let mut prev_loc = display_session
+            .query_pointer()
+            .unwrap_or((width / 2, height / 2));
 
         while self.running.load(Ordering::Relaxed) {
             match self.current_target {
@@ -127,7 +151,9 @@ impl SpatialEdgeEngine {
                                 norm_y: entry_norm_y,
                                 flags: 0,
                             };
-                            let _ = self.multiplexer.send(&enter_frame, SendReliability::ReliableOrdered);
+                            let _ = self
+                                .multiplexer
+                                .send(&enter_frame, SendReliability::ReliableOrdered);
 
                             // Grab input
                             if grabber.grab(cur_x, cur_y) {
@@ -150,7 +176,13 @@ impl SpatialEdgeEngine {
 
                     for frame in frames {
                         match frame {
-                            OutboundFrame::MouseReport { buttons, dx, dy, v_wheel, h_wheel } => {
+                            OutboundFrame::MouseReport {
+                                buttons,
+                                dx,
+                                dy,
+                                v_wheel,
+                                h_wheel,
+                            } => {
                                 let scaled_dx = ((dx as f64) * self.velocity_gain).round() as i16;
                                 let scaled_dy = ((dy as f64) * self.velocity_gain).round() as i16;
                                 let report = OutboundFrame::MouseReport {
@@ -168,7 +200,9 @@ impl SpatialEdgeEngine {
                                 let _ = self.multiplexer.send(&report, rel);
                             }
                             other => {
-                                let _ = self.multiplexer.send(&other, SendReliability::ReliableOrdered);
+                                let _ = self
+                                    .multiplexer
+                                    .send(&other, SendReliability::ReliableOrdered);
                             }
                         }
                     }
@@ -195,8 +229,13 @@ impl SpatialEdgeEngine {
         };
 
         if let Some(session) = X11DisplaySession::open() {
-            let cursor_ctrl = X11CursorController::new(session.display_ptr(), session.root_window());
-            let mut grabber = X11Grabber::new(session.display_ptr(), session.root_window(), cursor_ctrl.blank_cursor());
+            let cursor_ctrl =
+                unsafe { X11CursorController::new(session.display_ptr(), session.root_window()) };
+            let mut grabber = X11Grabber::new(
+                session.display_ptr(),
+                session.root_window(),
+                cursor_ctrl.blank_cursor(),
+            );
             grabber.ungrab();
             cursor_ctrl.warp(return_x, return_y);
             cursor_ctrl.show();
@@ -205,7 +244,10 @@ impl SpatialEdgeEngine {
         self.current_target = CursorTarget::Linux;
         self.last_return_us = now_monotonic_us();
         self.outward_push = 0.0;
-        println!("[EdgeEngine] Switched input target -> Linux (Local) at ({}, {})", return_x, return_y);
+        println!(
+            "[EdgeEngine] Switched input target -> Linux (Local) at ({}, {})",
+            return_x, return_y
+        );
     }
 
     fn force_return_to_linux(
@@ -215,7 +257,10 @@ impl SpatialEdgeEngine {
         width: i32,
         height: i32,
     ) {
-        let _ = self.multiplexer.send(&OutboundFrame::CursorLeave { reason: 1 }, SendReliability::ReliableOrdered);
+        let _ = self.multiplexer.send(
+            &OutboundFrame::CursorLeave { reason: 1 },
+            SendReliability::ReliableOrdered,
+        );
         grabber.ungrab();
         cursor_ctrl.warp(width / 2, height / 2);
         cursor_ctrl.show();

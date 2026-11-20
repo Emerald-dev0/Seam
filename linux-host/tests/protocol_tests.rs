@@ -2,7 +2,8 @@ use seam_linux_host::protocol::auth::{Authenticator, UDP_DATAGRAM_LEN};
 use seam_linux_host::protocol::crypto::{compute_hmac_sha256, compute_sha256};
 use seam_linux_host::protocol::frames::{InboundFrame, OutboundFrame};
 use seam_linux_host::protocol::wire::{
-    denormalize_coordinate, normalize_coordinate, EdgeSide, AUTH_STATUS_OK, MAGIC_BYTES, VERSION_BYTE,
+    denormalize_coordinate, normalize_coordinate, EdgeSide, AUTH_STATUS_OK, MAGIC_BYTES,
+    VERSION_BYTE,
 };
 use std::io::Cursor;
 
@@ -45,7 +46,7 @@ fn test_mouse_frame_serialization() {
 #[test]
 fn test_key_frame_serialization() {
     let frame = OutboundFrame::KeyReport {
-        modifiers: 0x01 | 0x08, // LCtrl + LMeta
+        modifiers: 0x01 | 0x08,                     // LCtrl + LMeta
         keys: [0x04, 0x05, 0x06, 0x00, 0x00, 0x00], // 'A', 'B', 'C'
     };
     let bytes = frame.serialize();
@@ -170,17 +171,20 @@ fn test_mutual_authentication_handshake_simulation() {
         let client_nonce = &resp[4..36];
         let client_hmac = &resp[36..68];
 
-        let expected_client_hmac = compute_hmac_sha256(
-            &key,
-            &[b"SEAM-CLIENT-AUTH-v1", &server_nonce, client_nonce],
-        );
+        let expected_client_hmac =
+            compute_hmac_sha256(&key, &[b"SEAM-CLIENT-AUTH-v1", &server_nonce, client_nonce]);
         assert_eq!(client_hmac, &expected_client_hmac);
 
         // 3. Send Server Ack
         let session_id_bytes = assigned_session_id.to_le_bytes();
         let server_hmac = compute_hmac_sha256(
             &key,
-            &[b"SEAM-SERVER-AUTH-v1", client_nonce, &server_nonce, &session_id_bytes],
+            &[
+                b"SEAM-SERVER-AUTH-v1",
+                client_nonce,
+                &server_nonce,
+                &session_id_bytes,
+            ],
         );
         let mut ack = vec![AUTH_STATUS_OK];
         ack.extend_from_slice(&session_id_bytes);
@@ -197,7 +201,10 @@ fn test_mutual_authentication_handshake_simulation() {
     impl std::io::Read for PipeReader {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
             while self.pos >= self.buf.len() {
-                self.buf = self.rx.recv().map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
+                self.buf = self
+                    .rx
+                    .recv()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
                 self.pos = 0;
             }
             let avail = self.buf.len() - self.pos;
@@ -219,16 +226,27 @@ fn test_mutual_authentication_handshake_simulation() {
         }
         fn flush(&mut self) -> std::io::Result<()> {
             if !self.buf.is_empty() {
-                self.tx.send(std::mem::take(&mut self.buf)).map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))?;
+                self.tx
+                    .send(std::mem::take(&mut self.buf))
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))?;
             }
             Ok(())
         }
     }
 
-    let mut reader = PipeReader { rx: s2c_rx, buf: Vec::new(), pos: 0 };
-    let mut writer = PipeWriter { tx: c2s_tx, buf: Vec::new() };
+    let mut reader = PipeReader {
+        rx: s2c_rx,
+        buf: Vec::new(),
+        pos: 0,
+    };
+    let mut writer = PipeWriter {
+        tx: c2s_tx,
+        buf: Vec::new(),
+    };
 
-    let session_id = client_auth.authenticate_client_stream(&mut reader, &mut writer).unwrap();
+    let session_id = client_auth
+        .authenticate_client_stream(&mut reader, &mut writer)
+        .unwrap();
     assert_eq!(session_id, assigned_session_id);
 
     server_handle.join().unwrap();

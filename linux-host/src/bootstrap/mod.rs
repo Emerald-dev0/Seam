@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 
 use crate::protocol::auth::Authenticator;
 use crate::protocol::crypto::compute_sha256;
-use crate::transport::adb::{forward_socket, list_devices, locate_adb, remove_forward, run_adb_command, AdbDevice};
+use crate::transport::adb::{
+    forward_socket, list_devices, locate_adb, remove_forward, run_adb_command, AdbDevice,
+};
 use crate::transport::SeamEndpoint;
 
 pub const REMOTE_JAR_PATH: &str = "/data/local/tmp/seam-agent.jar";
@@ -58,7 +60,12 @@ impl Bootstrapper {
     pub fn bootstrap_session(
         &self,
         preferred_serial: Option<&str>,
-    ) -> io::Result<(AdbDevice, SeamEndpoint, Vec<DiscoveredWifiEndpoint>, Authenticator)> {
+    ) -> io::Result<(
+        AdbDevice,
+        SeamEndpoint,
+        Vec<DiscoveredWifiEndpoint>,
+        Authenticator,
+    )> {
         let auth = Authenticator::load_or_create()?;
         let devices = self.list_devices()?;
         if devices.is_empty() {
@@ -92,10 +99,10 @@ impl Bootstrapper {
             ));
         }
         if !device.is_ready() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Device {} is in state '{}'", device.serial, device.state),
-            ));
+            return Err(io::Error::other(format!(
+                "Device {} is in state '{}'",
+                device.serial, device.state
+            )));
         }
 
         if !self.agent_jar_path.exists() {
@@ -127,13 +134,16 @@ impl Bootstrapper {
             "((pgrep -f seam_agent >/dev/null 2>&1 || ps -A 2>/dev/null | grep -q '[s]eam_agent') && cat {} 2>/dev/null) || true",
             REMOTE_STAMP_PATH
         );
-        let running_stamp = run_adb_command(
-            &self.adb_bin,
-            &["-s", &device.serial, "shell", &probe_cmd],
-        ).unwrap_or_default().trim().to_string();
+        let running_stamp =
+            run_adb_command(&self.adb_bin, &["-s", &device.serial, "shell", &probe_cmd])
+                .unwrap_or_default()
+                .trim()
+                .to_string();
 
         let wifi_endpoints = if !expected_stamp.is_empty() && running_stamp == expected_stamp {
-            if let Ok(endpoints) = self.wait_for_log_ready(&device.serial, Duration::from_millis(500)) {
+            if let Ok(endpoints) =
+                self.wait_for_log_ready(&device.serial, Duration::from_millis(500))
+            {
                 endpoints
             } else {
                 self.deploy_and_launch(&device.serial, auth.hex(), &expected_stamp)?
@@ -177,7 +187,10 @@ impl Bootstrapper {
         auth_key_hex: &str,
         stamp: &str,
     ) -> io::Result<Vec<DiscoveredWifiEndpoint>> {
-        let _ = run_adb_command(&self.adb_bin, &["-s", serial, "shell", "pkill -f seam_agent || true"]);
+        let _ = run_adb_command(
+            &self.adb_bin,
+            &["-s", serial, "shell", "pkill -f seam_agent || true"],
+        );
         run_adb_command(
             &self.adb_bin,
             &[
@@ -237,7 +250,10 @@ impl Bootstrapper {
 
         Err(io::Error::new(
             io::ErrorKind::TimedOut,
-            format!("Timed out waiting for SEAM agent daemon to start on {}", serial),
+            format!(
+                "Timed out waiting for SEAM agent daemon to start on {}",
+                serial
+            ),
         ))
     }
 
@@ -251,7 +267,10 @@ impl Bootstrapper {
         let _ = socket.set_read_timeout(Some(Duration::from_millis(400)));
 
         let probe = b"SEAM_DISCOVER_V1";
-        let target = SocketAddrV4::new(Ipv4Addr::new(255, 255, 255, 255), crate::protocol::wire::DEFAULT_PORT);
+        let target = SocketAddrV4::new(
+            Ipv4Addr::new(255, 255, 255, 255),
+            crate::protocol::wire::DEFAULT_PORT,
+        );
         let _ = socket.send_to(probe, target);
 
         let mut discovered = Vec::new();

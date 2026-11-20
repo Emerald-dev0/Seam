@@ -1,7 +1,7 @@
 use seam_linux_host::input::edge::SpatialEdgeEngine;
 use seam_linux_host::input::x11::keysym::{
-    keysym_to_hid, modifier_bit_for_keysym, KeyStateTracker, HID_USAGE_ESCAPE,
-    MOD_LEFT_ALT, MOD_LEFT_CTRL, MOD_LEFT_META, MOD_LEFT_SHIFT,
+    keysym_to_hid, modifier_bit_for_keysym, KeyStateTracker, HID_USAGE_ESCAPE, MOD_LEFT_ALT,
+    MOD_LEFT_CTRL, MOD_LEFT_META, MOD_LEFT_SHIFT,
 };
 use seam_linux_host::protocol::wire::EdgeSide;
 use seam_linux_host::transport::multiplexer::SeamTransportMultiplexer;

@@ -21,10 +21,21 @@ unsafe extern "C" {
     fn gtk_combo_box_text_new() -> *mut GtkWidget;
     fn gtk_combo_box_text_append_text(combo: *mut GtkWidget, text: *const c_char);
     fn gtk_combo_box_set_active(combo: *mut GtkWidget, index_: c_int);
-    fn gtk_scale_new_with_range(orientation: c_int, min: c_double, max: c_double, step: c_double) -> *mut GtkWidget;
+    fn gtk_scale_new_with_range(
+        orientation: c_int,
+        min: c_double,
+        max: c_double,
+        step: c_double,
+    ) -> *mut GtkWidget;
     fn gtk_range_set_value(range: *mut GtkWidget, value: c_double);
     fn gtk_container_add(container: *mut GtkWidget, widget: *mut GtkWidget);
-    fn gtk_box_pack_start(box_: *mut GtkWidget, child: *mut GtkWidget, expand: c_int, fill: c_int, padding: c_int);
+    fn gtk_box_pack_start(
+        box_: *mut GtkWidget,
+        child: *mut GtkWidget,
+        expand: c_int,
+        fill: c_int,
+        padding: c_int,
+    );
     fn gtk_widget_show_all(widget: *mut GtkWidget);
     fn gtk_main();
     fn gtk_main_quit();
@@ -65,7 +76,7 @@ pub fn launch_gtk_app() {
 
         let destroy_sig = CString::new("destroy").unwrap();
         g_signal_connect_data(
-            win as *mut libc::c_void,
+            win,
             destroy_sig.as_ptr(),
             on_destroy,
             ptr::null_mut(),
@@ -86,7 +97,11 @@ pub fn launch_gtk_app() {
         let status_text = format!(
             "Status: Ready | Devices: {} | X11: {}",
             report.device_count,
-            if report.x11_available { "Connected" } else { "Unavailable" }
+            if report.x11_available {
+                "Connected"
+            } else {
+                "Unavailable"
+            }
         );
         let status_cstr = CString::new(status_text).unwrap();
         let status_label = gtk_label_new(status_cstr.as_ptr());
@@ -101,7 +116,8 @@ pub fn launch_gtk_app() {
         let adb = locate_adb();
         let devices = list_devices(&adb).unwrap_or_default();
         if devices.is_empty() {
-            let none_cstr = CString::new("No devices found (Connect USB / Wi-Fi Debugging)").unwrap();
+            let none_cstr =
+                CString::new("No devices found (Connect USB / Wi-Fi Debugging)").unwrap();
             gtk_combo_box_text_append_text(dev_combo, none_cstr.as_ptr());
         } else {
             for d in &devices {
@@ -119,7 +135,12 @@ pub fn launch_gtk_app() {
         gtk_box_pack_start(main_box, edge_label, 0, 0, 2);
 
         let edge_combo = gtk_combo_box_text_new();
-        for &edge_name in &["Right Edge (Default)", "Left Edge", "Top Edge", "Bottom Edge"] {
+        for &edge_name in &[
+            "Right Edge (Default)",
+            "Left Edge",
+            "Top Edge",
+            "Bottom Edge",
+        ] {
             let cstr = CString::new(edge_name).unwrap();
             gtk_combo_box_text_append_text(edge_combo, cstr.as_ptr());
         }

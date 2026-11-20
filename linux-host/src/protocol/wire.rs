@@ -44,20 +44,25 @@ pub fn from_normalized_u16(val: u16, max_extent: i32) -> i32 {
     ((val as f64 / 65535.0) * (max_extent - 1) as f64).round() as i32
 }
 
-pub use to_normalized_u16 as normalize_coordinate;
 pub use from_normalized_u16 as denormalize_coordinate;
+pub use to_normalized_u16 as normalize_coordinate;
 
 pub fn read_prefixed_utf8<R: Read>(stream: &mut R) -> io::Result<String> {
     let mut len_bytes = [0u8; 4];
     stream.read_exact(&mut len_bytes)?;
     let count = u32::from_le_bytes(len_bytes) as usize;
     if count > MAX_CLIP_LEN {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Payload too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Payload too large",
+        ));
     }
     if count == 0 {
         return Ok(String::new());
     }
     let mut buf = vec![0u8; count];
     stream.read_exact(&mut buf)?;
-    String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    // Match the macOS and Android hosts, which decode clipboard payloads
+    // lossily rather than dropping the whole connection on invalid UTF-8.
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }

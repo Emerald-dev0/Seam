@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use crate::input::x11::ffi::*;
 use crate::input::x11::keysym::KeyStateTracker;
 use crate::protocol::frames::OutboundFrame;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub struct X11Grabber {
     display: *mut Display,

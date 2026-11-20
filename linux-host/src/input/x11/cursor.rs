@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::input::x11::ffi::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct X11CursorController {
     display: *mut Display,
@@ -9,8 +9,15 @@ pub struct X11CursorController {
 }
 
 impl X11CursorController {
-    pub fn new(display: *mut Display, root: Window) -> Self {
-        let blank_cursor = unsafe { Self::create_blank_cursor(display, root) };
+    /// Creates a cursor controller for an open X11 display.
+    ///
+    /// # Safety
+    ///
+    /// `display` must be a valid pointer returned by `XOpenDisplay` that remains
+    /// open for the lifetime of this controller, and `root` must be a window on
+    /// that display.
+    pub unsafe fn new(display: *mut Display, root: Window) -> Self {
+        let blank_cursor = Self::create_blank_cursor(display, root);
         Self {
             display,
             root,

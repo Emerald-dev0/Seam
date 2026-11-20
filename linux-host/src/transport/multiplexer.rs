@@ -5,8 +5,7 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::auth::Authenticator;
 use crate::protocol::frames::{InboundFrame, OutboundFrame};
 use crate::transport::{
-    SeamEndpoint, SeamTransport, SendReliability, TransportDelegate, TransportKind,
-    TransportState,
+    SeamEndpoint, SeamTransport, SendReliability, TransportDelegate, TransportKind, TransportState,
 };
 
 pub struct SeamTransportMultiplexer {
@@ -44,14 +43,16 @@ impl SeamTransportMultiplexer {
         let kind = transport.kind();
         transport.connect(endpoint, authenticator)?;
 
-        let mut t_lock = self.transports.lock().map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "Transport mutex poisoned")
-        })?;
+        let mut t_lock = self
+            .transports
+            .lock()
+            .map_err(|_| io::Error::other("Transport mutex poisoned"))?;
         t_lock.insert(kind, transport);
 
-        let mut p_lock = self.active_primary.lock().map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "Primary mutex poisoned")
-        })?;
+        let mut p_lock = self
+            .active_primary
+            .lock()
+            .map_err(|_| io::Error::other("Primary mutex poisoned"))?;
         if p_lock.is_none() || make_primary {
             *p_lock = Some(kind);
             println!("[Multiplexer] Active Primary Transport -> {}", kind);
@@ -63,11 +64,15 @@ impl SeamTransportMultiplexer {
     }
 
     pub fn switch_active_transport(&self, target_kind: TransportKind) -> io::Result<()> {
-        let t_lock = self.transports.lock().map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "Transport mutex poisoned")
-        })?;
+        let t_lock = self
+            .transports
+            .lock()
+            .map_err(|_| io::Error::other("Transport mutex poisoned"))?;
         let target = t_lock.get(&target_kind).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("Transport {} not found", target_kind))
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Transport {} not found", target_kind),
+            )
         })?;
 
         if !matches!(target.state(), TransportState::Ready { .. }) {
@@ -77,9 +82,10 @@ impl SeamTransportMultiplexer {
             ));
         }
 
-        let mut p_lock = self.active_primary.lock().map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "Primary mutex poisoned")
-        })?;
+        let mut p_lock = self
+            .active_primary
+            .lock()
+            .map_err(|_| io::Error::other("Primary mutex poisoned"))?;
         let prev = *p_lock;
         *p_lock = Some(target_kind);
 
@@ -98,15 +104,19 @@ impl SeamTransportMultiplexer {
             io::Error::new(io::ErrorKind::NotConnected, "No active primary transport")
         })?;
 
-        let t_lock = self.transports.lock().map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "Transport mutex poisoned")
-        })?;
+        let t_lock = self
+            .transports
+            .lock()
+            .map_err(|_| io::Error::other("Transport mutex poisoned"))?;
 
         if let Some(transport) = t_lock.get(&primary_kind) {
             match transport.send(frame, reliability) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    eprintln!("[Multiplexer] Primary transport {} failed ({}), attempting failover...", primary_kind, e);
+                    eprintln!(
+                        "[Multiplexer] Primary transport {} failed ({}), attempting failover...",
+                        primary_kind, e
+                    );
                 }
             }
         }
@@ -121,7 +131,10 @@ impl SeamTransportMultiplexer {
         }
 
         if let Some(fallback_kind) = new_primary {
-            println!("[Multiplexer] Hot-failover: {} -> {}", primary_kind, fallback_kind);
+            println!(
+                "[Multiplexer] Hot-failover: {} -> {}",
+                primary_kind, fallback_kind
+            );
             if let Ok(mut p_lock) = self.active_primary.lock() {
                 *p_lock = Some(fallback_kind);
             }
@@ -148,7 +161,10 @@ impl SeamTransportMultiplexer {
             for (&k, candidate) in t_lock.iter() {
                 if matches!(candidate.state(), TransportState::Ready { .. }) {
                     *p_lock = Some(k);
-                    println!("[Multiplexer] Promoted standby {} to primary after disconnect", k);
+                    println!(
+                        "[Multiplexer] Promoted standby {} to primary after disconnect",
+                        k
+                    );
                     break;
                 }
             }
