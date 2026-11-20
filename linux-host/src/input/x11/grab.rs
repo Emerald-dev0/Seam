@@ -13,6 +13,7 @@ pub struct X11Grabber {
     held_buttons: u8,
     park_x: i32,
     park_y: i32,
+    last_key_report: Option<(u8, [u8; 6])>,
 }
 
 impl X11Grabber {
@@ -26,6 +27,7 @@ impl X11Grabber {
             held_buttons: 0,
             park_x: 0,
             park_y: 0,
+            last_key_report: None,
         }
     }
 
@@ -38,10 +40,26 @@ impl X11Grabber {
         self.park_y = park_y;
         self.key_tracker.reset();
         self.held_buttons = 0;
+        self.last_key_report = None;
 
         let mask = (POINTER_MOTION_MASK | BUTTON_PRESS_MASK | BUTTON_RELEASE_MASK) as c_uint;
 
         unsafe {
+            // Put the pointer at the parking point before grabbing so the
+            // first motion event has a well-defined origin.
+            XWarpPointer(
+                self.display,
+                0,
+                self.root,
+                0,
+                0,
+                0,
+                0,
+                park_x,
+                park_y,
+            );
+            XSync(self.display, FALSE);
+
             let p_res = XGrabPointer(
                 self.display,
                 self.root,
@@ -86,6 +104,7 @@ impl X11Grabber {
             }
             self.key_tracker.reset();
             self.held_buttons = 0;
+            self.last_key_report = None;
         }
     }
 
@@ -213,26 +232,22 @@ impl X11Grabber {
                         let keycode = event.xkey.keycode as KeyCode;
                         let keysym = XKeycodeToKeysym(self.display, keycode, 0);
 
+                        // A deliberate chord returns control to Linux. A bare
+                        // Escape is forwarded to Android like any other key.
                         if self.key_tracker.is_panic_escape(keysym) {
                             should_panic_return = true;
                             break;
                         }
 
                         self.key_tracker.handle_key_down(keysym);
-                        frames.push(OutboundFrame::KeyReport {
-                            modifiers: self.key_tracker.current_modifiers(),
-                            keys: self.key_tracker.build_6kro_report(),
-                        });
+                        self.push_key_report(&mut frames);
                     }
                     KEY_RELEASE => {
                         let keycode = event.xkey.keycode as KeyCode;
                         let keysym = XKeycodeToKeysym(self.display, keycode, 0);
 
                         self.key_tracker.handle_key_up(keysym);
-                        frames.push(OutboundFrame::KeyReport {
-                            modifiers: self.key_tracker.current_modifiers(),
-                            keys: self.key_tracker.build_6kro_report(),
-                        });
+                        self.push_key_report(&mut frames);
                     }
                     _ => {}
                 }
@@ -240,6 +255,24 @@ impl X11Grabber {
         }
 
         (frames, should_panic_return)
+    }
+    /// Emits a key report only when the modifier/key state actually changed.
+    /// X11 auto-repeat delivers repeated `KEY_PRESS` events without matching
+    /// releases; Android's input stack performs its own repeat, so forwarding
+    /// duplicate reports is both wasteful and can confuse repeat handling.
+    fn push_key_report(&mut self, frames: &mut Vec<OutboundFrame>) {
+        let report = (
+            self.key_tracker.current_modifiers(),
+            self.key_tracker.build_6kro_report(),
+        );
+        if self.last_key_report.as_ref() == Some(&report) {
+            return;
+        }
+        self.last_key_report = Some(report);
+        frames.push(OutboundFrame::KeyReport {
+            modifiers: report.0,
+            keys: report.1,
+        });
     }
 }
 

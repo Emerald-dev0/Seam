@@ -1,6 +1,7 @@
 use crate::protocol::auth::Authenticator;
 use crate::protocol::frames::{InboundFrame, OutboundFrame};
 use std::io;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub mod adb;
@@ -81,6 +82,9 @@ pub trait SeamTransport: Send + Sync {
     fn kind(&self) -> TransportKind;
     fn state(&self) -> TransportState;
     fn last_rtt_us(&self) -> u64;
+    /// Installs the delegate that receives state changes, inbound frames, and
+    /// RTT measurements. The multiplexer calls this before `connect`.
+    fn set_delegate(&mut self, delegate: Arc<dyn TransportDelegate>);
     fn connect(&mut self, endpoint: &SeamEndpoint, authenticator: &Authenticator)
         -> io::Result<()>;
     fn send(&self, frame: &OutboundFrame, reliability: SendReliability) -> io::Result<()>;

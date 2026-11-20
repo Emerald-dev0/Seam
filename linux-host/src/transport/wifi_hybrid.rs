@@ -47,10 +47,6 @@ impl WifiHybridTransport {
         }
     }
 
-    pub fn set_delegate(&mut self, delegate: Arc<dyn TransportDelegate>) {
-        self.delegate = Some(delegate);
-    }
-
     pub fn last_udp_rtt_us(&self) -> u64 {
         self.last_udp_rtt_us.load(Ordering::Relaxed)
     }
@@ -85,6 +81,10 @@ impl SeamTransport for WifiHybridTransport {
 
     fn last_rtt_us(&self) -> u64 {
         self.last_rtt_us.load(Ordering::Relaxed)
+    }
+
+    fn set_delegate(&mut self, delegate: Arc<dyn TransportDelegate>) {
+        self.delegate = Some(delegate);
     }
 
     fn connect(

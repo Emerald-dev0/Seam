@@ -1,5 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -9,14 +10,75 @@ use crate::config::HostConfig;
 use crate::diagnostics::{print_diagnostics, run_self_test};
 use crate::input::edge::SpatialEdgeEngine;
 use crate::protocol::auth::Authenticator;
-use crate::protocol::frames::OutboundFrame;
+use crate::protocol::frames::{InboundFrame, OutboundFrame};
 use crate::protocol::wire::{EdgeSide, DEFAULT_PORT};
 use crate::transport::adb::{locate_adb, run_adb_command};
 use crate::transport::multiplexer::SeamTransportMultiplexer;
 use crate::transport::usb::UsbAdbTransport;
 use crate::transport::wifi_hybrid::WifiHybridTransport;
-use crate::transport::{SeamEndpoint, SeamTransport, SendReliability};
+use crate::transport::{
+    SeamEndpoint, SeamTransport, SendReliability, TransportDelegate, TransportKind, TransportState,
+};
 use crate::ui::launch_gtk_app;
+
+/// Routes inbound transport frames to the session: clipboard events are
+/// applied immediately, display telemetry is cached, and edge returns are
+/// queued for the input loop.
+struct SessionRouter {
+    inbound_tx: Sender<InboundFrame>,
+    clipboard: Arc<ClipboardSyncEngine>,
+    geometry: Arc<Mutex<Option<(u16, u16)>>>,
+}
+
+impl TransportDelegate for SessionRouter {
+    fn on_state_changed(&self, kind: TransportKind, state: TransportState) {
+        match state {
+            TransportState::Closed { reason } => {
+                eprintln!("[Transport] {kind} closed: {reason}");
+            }
+            TransportState::Ready { session_id } => {
+                println!("[Transport] {kind} ready (session=0x{session_id:016X})");
+            }
+            _ => {}
+        }
+    }
+
+    fn on_frame_received(&self, kind: TransportKind, frame: InboundFrame) {
+        match frame {
+            InboundFrame::ClipboardEvent(text) => {
+                println!("[Clipboard] Received {} bytes from Android via {kind}", text.len());
+                self.clipboard.apply_remote_text(&text);
+            }
+            InboundFrame::DisplayInfo(info) => {
+                let mut geometry = self.geometry.lock().ok();
+                let changed = match geometry.as_deref() {
+                    Some(Some((w, h))) => *w != info.width || *h != info.height,
+                    _ => true,
+                };
+                if let Some(slot) = geometry.as_deref_mut() {
+                    *slot = Some((info.width, info.height));
+                }
+                if changed {
+                    println!(
+                        "[Display] Android {}x{} @ {} dpi, rotation {}°, {} Hz",
+                        info.width,
+                        info.height,
+                        info.density_dpi,
+                        info.rotation_degrees(),
+                        info.refresh_rate
+                    );
+                }
+            }
+            InboundFrame::EdgeReturn(ret) => {
+                let _ = self.inbound_tx.send(InboundFrame::EdgeReturn(ret));
+            }
+            InboundFrame::Pong { .. } => {}
+        }
+    }
+
+    fn on_rtt_measured(&self, _kind: TransportKind, _rtt_us: u64) {}
+}
+
 
 pub fn resolve_agent_jar_path() -> PathBuf {
     if let Ok(env_path) = std::env::var("SEAM_AGENT_JAR") {
@@ -181,10 +243,24 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
 
     let mux = Arc::new(SeamTransportMultiplexer::new());
 
+    // Start clipboard synchronization before installing the delegate so that
+    // Android -> Linux clipboard events can be applied immediately.
+    let clipboard = Arc::new(ClipboardSyncEngine::new(Arc::clone(&mux)));
+    clipboard.start();
+
+    let geometry = Arc::new(Mutex::new(None));
+    let (inbound_tx, inbound_rx) = mpsc::channel();
+    mux.set_delegate(Arc::new(SessionRouter {
+        inbound_tx,
+        clipboard: Arc::clone(&clipboard),
+        geometry: Arc::clone(&geometry),
+    }));
+
     // Connect USB transport
     let usb = Box::new(UsbAdbTransport::new());
     if let Err(e) = mux.add_and_connect_transport(usb, &usb_endpoint, &auth, true) {
         eprintln!("Failed to connect USB ADB transport: {}", e);
+        clipboard.stop();
         bootstrapper.teardown_session(&device.serial);
         return;
     }
@@ -202,10 +278,6 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
         }
     }
 
-    // Start clipboard synchronization
-    let mut clipboard = ClipboardSyncEngine::new(Arc::clone(&mux));
-    clipboard.start();
-
     // Start spatial screen-edge engine
     let mut edge_engine = SpatialEdgeEngine::new(Arc::clone(&mux));
     edge_engine.set_active_edge(config.active_edge);
@@ -216,10 +288,10 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
         "Ready! Move your cursor against the {:?} screen edge to cross onto Android.",
         config.active_edge
     );
-    println!("Press Escape at any time to panic return cursor to Linux.");
+    println!("Press Ctrl+Alt+Shift+Escape (or Ctrl+Alt+Q) to return to Linux.");
     println!("------------------------------------------------------------");
 
-    edge_engine.run_session();
+    edge_engine.run_session(&inbound_rx);
 
     clipboard.stop();
     mux.disconnect_all("Session terminated");

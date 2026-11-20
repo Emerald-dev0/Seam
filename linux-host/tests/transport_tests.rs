@@ -3,7 +3,8 @@ use seam_linux_host::protocol::frames::OutboundFrame;
 use seam_linux_host::transport::adb::AdbDevice;
 use seam_linux_host::transport::multiplexer::SeamTransportMultiplexer;
 use seam_linux_host::transport::{
-    now_monotonic_us, SeamEndpoint, SeamTransport, SendReliability, TransportKind, TransportState,
+    now_monotonic_us, SeamEndpoint, SeamTransport, SendReliability, TransportDelegate,
+    TransportKind, TransportState,
 };
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,6 +44,10 @@ impl SeamTransport for MockTransport {
     fn connect(&mut self, _endpoint: &SeamEndpoint, _auth: &Authenticator) -> io::Result<()> {
         self.state = TransportState::Ready { session_id: 12345 };
         Ok(())
+    }
+
+    fn set_delegate(&mut self, _delegate: Arc<dyn TransportDelegate>) {
+        // no-op mock
     }
 
     fn send(&self, frame: &OutboundFrame, _rel: SendReliability) -> io::Result<()> {

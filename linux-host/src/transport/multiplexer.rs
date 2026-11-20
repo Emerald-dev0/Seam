@@ -25,7 +25,14 @@ impl SeamTransportMultiplexer {
 
     pub fn set_delegate(&self, delegate: Arc<dyn TransportDelegate>) {
         if let Ok(mut lock) = self.delegate.lock() {
-            *lock = Some(delegate);
+            *lock = Some(Arc::clone(&delegate));
+        }
+        // Propagate to transports that were registered before the delegate was
+        // installed (for example a Wi-Fi standby transport added first).
+        if let Ok(mut transports) = self.transports.lock() {
+            for transport in transports.values_mut() {
+                transport.set_delegate(Arc::clone(&delegate));
+            }
         }
     }
 
@@ -41,6 +48,14 @@ impl SeamTransportMultiplexer {
         make_primary: bool,
     ) -> io::Result<()> {
         let kind = transport.kind();
+        let delegate = self
+            .delegate
+            .lock()
+            .ok()
+            .and_then(|lock| lock.as_ref().map(Arc::clone));
+        if let Some(delegate) = delegate {
+            transport.set_delegate(delegate);
+        }
         transport.connect(endpoint, authenticator)?;
 
         let mut t_lock = self

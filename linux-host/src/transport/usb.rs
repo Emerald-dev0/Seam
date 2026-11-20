@@ -71,6 +71,10 @@ impl SeamTransport for UsbAdbTransport {
         self.last_rtt_us.load(Ordering::Relaxed)
     }
 
+    fn set_delegate(&mut self, delegate: Arc<dyn TransportDelegate>) {
+        self.delegate = Some(delegate);
+    }
+
     fn connect(
         &mut self,
         endpoint: &SeamEndpoint,

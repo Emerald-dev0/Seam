@@ -165,8 +165,15 @@ impl KeyStateTracker {
     }
 
     pub fn is_panic_escape(&self, keysym: KeySym) -> bool {
-        // Escape key by itself, or Ctrl+Alt+Shift+Escape
-        keysym == 0xff1b
+        let ctrl = self.modifiers & (MOD_LEFT_CTRL | MOD_RIGHT_CTRL) != 0;
+        let alt = self.modifiers & (MOD_LEFT_ALT | MOD_RIGHT_ALT) != 0;
+        let shift = self.modifiers & (MOD_LEFT_SHIFT | MOD_RIGHT_SHIFT) != 0;
+
+        // Match the macOS host's deliberate escape chords instead of hijacking
+        // a bare Escape key, which must remain usable on Android.
+        let escape_chord = keysym == 0xff1b && ctrl && alt && shift;
+        let q_chord = (keysym == 0x0071 || keysym == 0x0051) && ctrl && alt;
+        escape_chord || q_chord
     }
 
     pub fn current_modifiers(&self) -> u8 {
