@@ -20,6 +20,12 @@ const EDGE_PUSH_THRESHOLD_PX: f64 = 2.0;
 /// while doing something else does not accumulate into an accidental crossing.
 const EDGE_PUSH_WINDOW_US: u64 = 200_000;
 
+/// Outward movement credited per poll while the pointer is pinned against the
+/// screen boundary. X11 clamps the pointer at the bezel, so the physical push
+/// past the edge arrives as a zero delta; without this the final "lean" into
+/// the edge would never reach the threshold.
+const EDGE_DWELL_CREDIT_PX: f64 = 0.55;
+
 /// Cooldown after returning from Android, preventing the same gesture from
 /// immediately re-entering Android.
 const RETURN_COOLDOWN_US: u64 = 180_000;
@@ -145,7 +151,11 @@ impl SpatialEdgeEngine {
                 if dx > 0.0 { dx } else { 0.0 },
             ),
             EdgeSide::Left => (x <= 3, in_safe_vertical, if dx < 0.0 { -dx } else { 0.0 }),
-            EdgeSide::Bottom => (height - y <= 3, in_safe_horizontal, if dy > 0.0 { dy } else { 0.0 }),
+            EdgeSide::Bottom => (
+                height - y <= 3,
+                in_safe_horizontal,
+                if dy > 0.0 { dy } else { 0.0 },
+            ),
             EdgeSide::Top => (y <= 3, in_safe_horizontal, if dy < 0.0 { -dy } else { 0.0 }),
         };
 
@@ -154,10 +164,43 @@ impl SpatialEdgeEngine {
             return false;
         }
 
+        let at_wall = match self.active_edge {
+            EdgeSide::Right => x >= width - 1,
+            EdgeSide::Left => x <= 0,
+            EdgeSide::Bottom => y >= height - 1,
+            EdgeSide::Top => y <= 0,
+        };
+
         if outward_delta <= 0.0 {
-            // At the edge but not pushing outward: do not accumulate. If the
-            // last real push is stale, forget it.
-            if now.saturating_sub(self.last_outward_push_us) > EDGE_PUSH_WINDOW_US {
+            // Pinned against the bezel: X11 clamps the pointer, so there is no
+            // further delta even though the user is still pushing outward.
+            // Credit a small dwell amount so a slow push that lands exactly on
+            // the wall still crosses. Any inward motion (or a pause away from
+            // the wall) resets the accumulator.
+            if at_wall {
+                if now.saturating_sub(self.last_outward_push_us) > EDGE_PUSH_WINDOW_US {
+                    self.outward_push = 0.0;
+                }
+                self.last_outward_push_us = now;
+                self.outward_push += EDGE_DWELL_CREDIT_PX;
+                if self.outward_push >= EDGE_PUSH_THRESHOLD_PX {
+                    self.outward_push = 0.0;
+                    return true;
+                }
+                return false;
+            }
+            // Moving back toward the screen centre invalidates any partial
+            // outward push.
+            let moving_inward = match self.active_edge {
+                EdgeSide::Right => dx < 0.0,
+                EdgeSide::Left => dx > 0.0,
+                EdgeSide::Bottom => dy < 0.0,
+                EdgeSide::Top => dy > 0.0,
+            };
+            if moving_inward {
+                self.outward_push = 0.0;
+                self.last_outward_push_us = 0;
+            } else if now.saturating_sub(self.last_outward_push_us) > EDGE_PUSH_WINDOW_US {
                 self.outward_push = 0.0;
             }
             return false;
@@ -179,6 +222,20 @@ impl SpatialEdgeEngine {
     /// Runs the interactive input loop on the calling thread. Inbound frames
     /// (notably `EDGE_RETURN`) are drained from `inbound` on every iteration.
     pub fn run_session(&mut self, inbound: &Receiver<InboundFrame>) {
+        let stop = AtomicBool::new(false);
+        let panic = AtomicBool::new(false);
+        self.run_session_with(inbound, &stop, &panic);
+    }
+
+    /// Runs the interactive input loop, observing external `stop` and `panic`
+    /// flags so a UI can terminate the session or force a return to Linux.
+    /// `panic` is consumed (reset) when handled.
+    pub fn run_session_with(
+        &mut self,
+        inbound: &Receiver<InboundFrame>,
+        stop: &AtomicBool,
+        panic: &AtomicBool,
+    ) {
         let display_session = match X11DisplaySession::open() {
             Some(s) => s,
             None => {
@@ -202,8 +259,22 @@ impl SpatialEdgeEngine {
             .query_pointer()
             .unwrap_or((width / 2, height / 2));
 
-        while self.running.load(Ordering::SeqCst) {
-            self.drain_inbound(inbound, &mut grabber, &cursor_ctrl, width, height, &mut prev_loc);
+        while self.running.load(Ordering::SeqCst) && !stop.load(Ordering::SeqCst) {
+            if panic.swap(false, Ordering::SeqCst) && self.current_target == CursorTarget::Android {
+                println!("[EdgeEngine] Panic return requested; returning to Linux");
+                self.force_return_to_linux(&mut grabber, &cursor_ctrl, width, height);
+                prev_loc = (width / 2, height / 2);
+                continue;
+            }
+
+            self.drain_inbound(
+                inbound,
+                &mut grabber,
+                &cursor_ctrl,
+                width,
+                height,
+                &mut prev_loc,
+            );
 
             match self.current_target {
                 CursorTarget::Linux => {
@@ -248,6 +319,10 @@ impl SpatialEdgeEngine {
                                 eprintln!(
                                     "[EdgeEngine] Could not grab X11 pointer/keyboard; staying on Linux"
                                 );
+                                // Leave the pointer where the user left it
+                                // instead of stranding it at the park point.
+                                cursor_ctrl.warp(cur_x, cur_y);
+                                prev_loc = (cur_x, cur_y);
                                 let _ = self.multiplexer.send(
                                     &OutboundFrame::CursorLeave { reason: 2 },
                                     SendReliability::ReliableOrdered,
@@ -276,10 +351,8 @@ impl SpatialEdgeEngine {
                                 v_wheel,
                                 h_wheel,
                             } => {
-                                let scaled_dx =
-                                    ((dx as f64) * self.velocity_gain).round() as i16;
-                                let scaled_dy =
-                                    ((dy as f64) * self.velocity_gain).round() as i16;
+                                let scaled_dx = ((dx as f64) * self.velocity_gain).round() as i16;
+                                let scaled_dy = ((dy as f64) * self.velocity_gain).round() as i16;
                                 let report = OutboundFrame::MouseReport {
                                     buttons,
                                     dx: scaled_dx,
@@ -312,9 +385,10 @@ impl SpatialEdgeEngine {
         }
 
         if self.current_target == CursorTarget::Android {
-            let _ = self
-                .multiplexer
-                .send(&OutboundFrame::CursorLeave { reason: 1 }, SendReliability::ReliableOrdered);
+            let _ = self.multiplexer.send(
+                &OutboundFrame::CursorLeave { reason: 1 },
+                SendReliability::ReliableOrdered,
+            );
         }
         grabber.ungrab();
         cursor_ctrl.show();

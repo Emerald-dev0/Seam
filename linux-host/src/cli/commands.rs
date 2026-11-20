@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -46,7 +47,10 @@ impl TransportDelegate for SessionRouter {
     fn on_frame_received(&self, kind: TransportKind, frame: InboundFrame) {
         match frame {
             InboundFrame::ClipboardEvent(text) => {
-                println!("[Clipboard] Received {} bytes from Android via {kind}", text.len());
+                println!(
+                    "[Clipboard] Received {} bytes from Android via {kind}",
+                    text.len()
+                );
                 self.clipboard.apply_remote_text(&text);
             }
             InboundFrame::DisplayInfo(info) => {
@@ -79,7 +83,6 @@ impl TransportDelegate for SessionRouter {
     fn on_rtt_measured(&self, _kind: TransportKind, _rtt_us: u64) {}
 }
 
-
 pub fn resolve_agent_jar_path() -> PathBuf {
     if let Ok(env_path) = std::env::var("SEAM_AGENT_JAR") {
         let p = PathBuf::from(env_path);
@@ -102,6 +105,34 @@ pub fn resolve_agent_jar_path() -> PathBuf {
             if candidate3.is_file() {
                 return candidate3;
             }
+            // Installed layout: <prefix>/bin/seam + <prefix>/share/seam/seam-agent.jar
+            let candidate4 = exe_dir.join("../share/seam/seam-agent.jar");
+            if candidate4.is_file() {
+                return candidate4;
+            }
+            let candidate5 = exe_dir.join("../../share/seam/seam-agent.jar");
+            if candidate5.is_file() {
+                return candidate5;
+            }
+        }
+    }
+
+    let mut data_dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        if !xdg.is_empty() {
+            data_dirs.push(PathBuf::from(xdg).join("seam"));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        data_dirs.push(PathBuf::from(home).join(".local/share/seam"));
+    }
+    data_dirs.push(PathBuf::from("/usr/local/share/seam"));
+    data_dirs.push(PathBuf::from("/usr/share/seam"));
+
+    for dir in &data_dirs {
+        let candidate = dir.join("seam-agent.jar");
+        if candidate.is_file() {
+            return candidate;
         }
     }
 
@@ -110,7 +141,6 @@ pub fn resolve_agent_jar_path() -> PathBuf {
         cwd.join("dist/seam-agent.jar"),
         cwd.join("seam-agent.jar"),
         cwd.join("../dist/seam-agent.jar"),
-        PathBuf::from("/usr/share/seam/seam-agent.jar"),
     ] {
         if candidate.is_file() {
             return candidate.clone();
@@ -202,13 +232,35 @@ pub fn run_device_info() {
     }
 }
 
+/// Shared, thread-safe status for the CLI and GTK UI.
+#[derive(Clone, Debug)]
+pub struct SessionStatus {
+    pub text: String,
+    pub active: bool,
+}
+
+impl SessionStatus {
+    pub fn new(text: impl Into<String>, active: bool) -> Self {
+        Self {
+            text: text.into(),
+            active,
+        }
+    }
+}
+
+impl Default for SessionStatus {
+    fn default() -> Self {
+        Self {
+            text: "Idle".to_string(),
+            active: false,
+        }
+    }
+}
+
 pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) {
     println!("============================================================");
     println!(" SEAM Linux Host — Screen-Edge Crossing Mode");
     println!("============================================================");
-
-    let jar_path = resolve_agent_jar_path();
-    let bootstrapper = Bootstrapper::new(jar_path);
 
     let mut config = HostConfig::load();
     if let Some(edge_str) = edge_override {
@@ -224,21 +276,55 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
         }
     }
 
+    let stop = Arc::new(AtomicBool::new(false));
+    let panic = Arc::new(AtomicBool::new(false));
+    let status = Arc::new(Mutex::new(SessionStatus::default()));
+
+    if let Err(e) = run_connect_session(
+        preferred_serial,
+        config.active_edge,
+        config.velocity_gain,
+        stop,
+        panic,
+        status,
+    ) {
+        eprintln!("Session error: {}", e);
+    }
+}
+
+/// Runs a full screen-edge crossing session on the calling thread.
+///
+/// `stop` terminates the session loop, while `panic` (one-shot) forces the
+/// cursor back to Linux without ending the session. `status` is updated at
+/// each lifecycle transition so a UI can render progress.
+pub fn run_connect_session(
+    preferred_serial: Option<&str>,
+    active_edge: EdgeSide,
+    velocity_gain: f64,
+    stop: Arc<AtomicBool>,
+    panic: Arc<AtomicBool>,
+    status: Arc<Mutex<SessionStatus>>,
+) -> std::io::Result<()> {
+    let set_status = |text: &str, active: bool| {
+        if let Ok(mut guard) = status.lock() {
+            *guard = SessionStatus::new(text, active);
+        }
+    };
+
+    set_status("Connecting to Android device…", false);
+
+    let jar_path = resolve_agent_jar_path();
+    let bootstrapper = Bootstrapper::new(jar_path);
+
     println!("Bootstrapping session on Android device...");
     let (device, usb_endpoint, wifi_endpoints, auth) =
-        match bootstrapper.bootstrap_session(preferred_serial) {
-            Ok(res) => res,
-            Err(e) => {
-                eprintln!("Bootstrap error: {}", e);
-                return;
-            }
-        };
+        bootstrapper.bootstrap_session(preferred_serial)?;
 
     println!(
         "Attached device      : {} ({})",
         device.serial, device.model
     );
-    println!("Active Boundary Edge : {:?}", config.active_edge);
+    println!("Active Boundary Edge : {:?}", active_edge);
     println!("USB ADB Endpoint     : {:?}", usb_endpoint);
 
     let mux = Arc::new(SeamTransportMultiplexer::new());
@@ -259,10 +345,9 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
     // Connect USB transport
     let usb = Box::new(UsbAdbTransport::new());
     if let Err(e) = mux.add_and_connect_transport(usb, &usb_endpoint, &auth, true) {
-        eprintln!("Failed to connect USB ADB transport: {}", e);
         clipboard.stop();
         bootstrapper.teardown_session(&device.serial);
-        return;
+        return Err(e);
     }
 
     // Connect Wi-Fi standby transport if available
@@ -280,23 +365,30 @@ pub fn run_connect(preferred_serial: Option<&str>, edge_override: Option<&str>) 
 
     // Start spatial screen-edge engine
     let mut edge_engine = SpatialEdgeEngine::new(Arc::clone(&mux));
-    edge_engine.set_active_edge(config.active_edge);
-    edge_engine.set_velocity_gain(config.velocity_gain);
+    edge_engine.set_active_edge(active_edge);
+    edge_engine.set_velocity_gain(velocity_gain);
 
     println!("------------------------------------------------------------");
     println!(
         "Ready! Move your cursor against the {:?} screen edge to cross onto Android.",
-        config.active_edge
+        active_edge
     );
     println!("Press Ctrl+Alt+Shift+Escape (or Ctrl+Alt+Q) to return to Linux.");
     println!("------------------------------------------------------------");
 
-    edge_engine.run_session(&inbound_rx);
+    set_status(
+        &format!("Session active — push the cursor past the {active_edge:?} edge"),
+        true,
+    );
+
+    edge_engine.run_session_with(&inbound_rx, &stop, &panic);
 
     clipboard.stop();
     mux.disconnect_all("Session terminated");
     bootstrapper.teardown_session(&device.serial);
+    set_status("Session ended", false);
     println!("SEAM session ended.");
+    Ok(())
 }
 
 pub fn run_disconnect(serial: Option<&str>) {

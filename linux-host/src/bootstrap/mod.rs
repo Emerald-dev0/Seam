@@ -129,9 +129,12 @@ impl Bootstrapper {
         // 2. Compute stamp
         let expected_stamp = self.compute_stamp(auth.hex())?;
 
-        // 3. Check if daemon is already running with exact matching stamp
+        // 3. Check if daemon is already running with exact matching stamp.
+        // `pgrep -f seam_agent` is unusable here: the probe shell's own command
+        // line contains the pattern, so it always matches and a stale stamp
+        // makes the host skip launching a dead agent.
         let probe_cmd = format!(
-            "((pgrep -f seam_agent >/dev/null 2>&1 || ps -A 2>/dev/null | grep -q '[s]eam_agent') && cat {} 2>/dev/null) || true",
+            "(pidof seam_agent >/dev/null 2>&1 && cat {} 2>/dev/null) || true",
             REMOTE_STAMP_PATH
         );
         let running_stamp =
@@ -189,7 +192,7 @@ impl Bootstrapper {
     ) -> io::Result<Vec<DiscoveredWifiEndpoint>> {
         let _ = run_adb_command(
             &self.adb_bin,
-            &["-s", serial, "shell", "pkill -f seam_agent || true"],
+            &["-s", serial, "shell", "pkill -x seam_agent || true"],
         );
         run_adb_command(
             &self.adb_bin,

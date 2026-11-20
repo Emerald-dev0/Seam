@@ -106,3 +106,45 @@ fn test_edge_crossing_logic() {
     // Push again (+1.0) -> accumulator reaches 2.5 >= 2.0 -> triggers crossing!
     assert!(engine.evaluate_crossing(1918, 500, 1.0, 0.0, width, height));
 }
+
+#[test]
+fn test_edge_crossing_slow_push_pinned_at_wall() {
+    let mux = Arc::new(SeamTransportMultiplexer::new());
+    let mut engine = SpatialEdgeEngine::new(mux);
+    engine.set_active_edge(EdgeSide::Right);
+
+    let (width, height) = (1920, 1080);
+
+    // A slow 1 px step lands exactly on the last pixel: not enough on its own.
+    assert!(!engine.evaluate_crossing(width - 1, 500, 1.0, 0.0, width, height));
+
+    // X11 clamps the pointer at the bezel, so every following poll reports
+    // dx = 0. The dwell credit must still carry the accumulator to threshold.
+    let mut crossed = false;
+    for _ in 0..8 {
+        if engine.evaluate_crossing(width - 1, 500, 0.0, 0.0, width, height) {
+            crossed = true;
+            break;
+        }
+    }
+    assert!(
+        crossed,
+        "pointer pinned against the right bezel should cross"
+    );
+}
+
+#[test]
+fn test_edge_crossing_inward_motion_resets_push() {
+    let mux = Arc::new(SeamTransportMultiplexer::new());
+    let mut engine = SpatialEdgeEngine::new(mux);
+    engine.set_active_edge(EdgeSide::Right);
+
+    let (width, height) = (1920, 1080);
+
+    // Partial outward push, then retreat toward the centre.
+    assert!(!engine.evaluate_crossing(width - 1, 500, 1.0, 0.0, width, height));
+    assert!(!engine.evaluate_crossing(width - 4, 500, -3.0, 0.0, width, height));
+
+    // A fresh 1 px push must not inherit the earlier credit.
+    assert!(!engine.evaluate_crossing(width - 1, 500, 1.0, 0.0, width, height));
+}
